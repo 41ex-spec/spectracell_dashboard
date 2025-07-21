@@ -1,22 +1,14 @@
 # SpectraCell Dashboard
 
-![Dashboard Screenshot](assets/screenshot.png) A multi-page interactive web dashboard built with Dash (Plotly/Dash) for analyzing SpectraCell monthly kit data. This application provides insights into monthly trends of kits sent vs. samples returned and allows for the on-demand merging and analysis of single-month inbound and outbound reports.
+A multi-page interactive web dashboard built with Dash (Plotly/Dash) for analyzing SpectraCell monthly kit data. This application provides insights into monthly trends of kits sent vs. samples returned and allows for the on-demand merging and analysis of single-month inbound and outbound reports.
 
 ## Table of Contents
 
 * [Features](#features)
-* [Demo](#demo)
 * [Local Setup](#local-setup)
     * [Prerequisites](#prerequisites)
     * [Installation](#installation)
     * [Running Locally](#running-locally)
-* [Project Structure](#project-structure)
-* [Usage](#usage)
-    * [Monthly Trends](#monthly-trends)
-    * [Single Month Merger](#single-month-merger)
-* [Deployment](#deployment)
-* [Technologies Used](#technologies-used)
-* [Contributing](#contributing)
 * [License](#license)
 * [Contact](#contact)
 
@@ -28,13 +20,6 @@
 * **Dynamic Data Processing:** Automatically processes uploaded files, calculates remaining kits, and displays a merged, filterable, and sortable table.
 * **CSV Download:** Download the merged monthly report directly from the dashboard.
 * **Multi-page Application:** Seamless navigation between different analysis views.
-
-## Demo
-
-You can access a live demo of this dashboard deployed on Render:
-[https://[YOUR-RENDER-APP-NAME].onrender.com/](https://[YOUR-RENDER-APP-NAME].onrender.com/)
-
-*(Replace `[YOUR-RENDER-APP-NAME]` with your actual Render URL once deployed.)*
 
 ## Local Setup
 
@@ -88,5 +73,3 @@ Before you begin, ensure you have the following installed:
 
 2.  **Access the dashboard:**
     Open your web browser and navigate to the URL displayed in your terminal (e.g., `http://127.0.0.1:8050/`).
-
-## Project Structure
