@@ -132,11 +132,11 @@ def parse_contents(contents, filename):
                 id_vars=[col for col in df_melted.columns if col not in ['ACD', 'Blue', 'Lav', 'SST', 'KitDescription', 'KitCount']],
                 value_vars=['ACD', 'Blue', 'Lav', 'SST'],
                 var_name='TubeType',
-                value_name='KitsSent'
+                value_name='TubesSent'
             )
-            df_outbound_tubes = df_outbound_tubes[df_outbound_tubes['KitsSent'] > 0] # Keep only tubes that were sent
-            # Final aggregation for outbound data: sum KitsSent by Location, YearMonth, TubeType
-            df_outbound_tubes = df_outbound_tubes.groupby(['Location', 'YearMonth', 'TubeType']).agg(KitsSent=('KitsSent', 'sum')).reset_index()
+            df_outbound_tubes = df_outbound_tubes[df_outbound_tubes['TubesSent'] > 0] # Keep only tubes that were sent
+            # Final aggregation for outbound data: sum TubesSent by Location, YearMonth, TubeType
+            df_outbound_tubes = df_outbound_tubes.groupby(['Location', 'YearMonth', 'TubeType']).agg(TubesSent=('TubesSent', 'sum')).reset_index()
 
             return df_outbound_tubes, None
 
@@ -335,7 +335,7 @@ def register_callbacks(app):
             ).fillna(0) # Fill NaN values (from outer merge) with 0
 
             # Calculate 'RemainingKits'
-            merged_df['RemainingKits'] = merged_df['KitsSent'] - merged_df['SamplesReturned']
+            merged_df['RemainingKits'] = merged_df['TubesSent'] - merged_df['SamplesReturned']
             merged_df = merged_df.sort_values(by=['YearMonth', 'Location', 'TubeType']).reset_index(drop=True)
             # Create a display-friendly YearMonth column
             merged_df['YearMonth_Display'] = merged_df['YearMonth'].dt.strftime('%Y-%m')
@@ -358,7 +358,7 @@ def register_callbacks(app):
         if jsonified_data:
             df = pd.read_json(jsonified_data, orient='split')
             # Define desired column order for display
-            display_cols_order = ['Location', 'YearMonth_Display', 'TubeType', 'KitsSent', 'SamplesReturned', 'RemainingKits']
+            display_cols_order = ['Location', 'YearMonth_Display', 'TubeType', 'TubesSent', 'SamplesReturned', 'RemainingKits']
             # Get actual columns that exist and reorder them
             final_display_columns = [col for col in display_cols_order if col in df.columns] + \
                                    [col for col in df.columns if col not in display_cols_order and col not in ['YearMonth']] # Add any other columns that exist but aren't in desired order
