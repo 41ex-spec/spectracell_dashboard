@@ -164,7 +164,7 @@ def parse_contents(contents, filename):
             df = df.dropna(subset=['YearMonth']) # Remove rows where YearMonth couldn't be parsed
 
             # Aggregate incoming samples by Location, YearMonth, and TubeType
-            df_inbound_agg = df.groupby(['Location', 'YearMonth', 'TubeType']).agg(SamplesReturned=('Count', 'sum')).reset_index()
+            df_inbound_agg = df.groupby(['Location', 'YearMonth', 'TubeType']).agg(TubesReturned=('Count', 'sum')).reset_index()
 
             return df_inbound_agg, None
 
@@ -334,8 +334,8 @@ def register_callbacks(app):
                 how='outer'
             ).fillna(0) # Fill NaN values (from outer merge) with 0
 
-            # Calculate 'RemainingKits'
-            merged_df['RemainingKits'] = merged_df['TubesSent'] - merged_df['SamplesReturned']
+            # Calculate 'RemainingTubes'
+            merged_df['RemainingTubes'] = merged_df['TubesSent'] - merged_df['TubesReturned']
             merged_df = merged_df.sort_values(by=['YearMonth', 'Location', 'TubeType']).reset_index(drop=True)
             # Create a display-friendly YearMonth column
             merged_df['YearMonth_Display'] = merged_df['YearMonth'].dt.strftime('%Y-%m')
@@ -358,7 +358,7 @@ def register_callbacks(app):
         if jsonified_data:
             df = pd.read_json(jsonified_data, orient='split')
             # Define desired column order for display
-            display_cols_order = ['Location', 'YearMonth_Display', 'TubeType', 'TubesSent', 'SamplesReturned', 'RemainingKits']
+            display_cols_order = ['Location', 'YearMonth_Display', 'TubeType', 'TubesSent', 'TubesReturned', 'RemainingTubes']
             # Get actual columns that exist and reorder them
             final_display_columns = [col for col in display_cols_order if col in df.columns] + \
                                    [col for col in df.columns if col not in display_cols_order and col not in ['YearMonth']] # Add any other columns that exist but aren't in desired order
