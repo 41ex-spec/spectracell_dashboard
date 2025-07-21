@@ -9,7 +9,6 @@ A multi-page interactive web dashboard built with Dash (Plotly/Dash) for analyzi
     * [Prerequisites](#prerequisites)
     * [Installation](#installation)
     * [Running Locally](#running-locally)
-* [License](#license)
 * [Contact](#contact)
 
 ## Features
@@ -73,3 +72,7 @@ Before you begin, ensure you have the following installed:
 
 2.  **Access the dashboard:**
     Open your web browser and navigate to the URL displayed in your terminal (e.g., `http://127.0.0.1:8050/`).
+
+### Contact
+* **Creator:** 41ex-spec
+* **GitHub:** [https://github.com/41ex-spec](https://github.com/41ex-spec)
