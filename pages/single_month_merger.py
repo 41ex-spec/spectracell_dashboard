@@ -34,18 +34,50 @@ def parse_contents(contents, filename):
     error_message = None
 
     try:
-        # Determine if it's an outbound or inbound file based on filename pattern
         is_outbound = "out_" in filename
         is_inbound = "in_" in filename
 
         if is_outbound and filename.endswith(".csv"):
-            # Outbound file processing (assuming header on 2nd row, i.e., header=1)
-            df = pd.read_csv(io.StringIO(decoded.decode('utf-8')), header=1, on_bad_lines='skip', engine='python')
-            df.columns = df.columns.str.strip() # Clean column names
+            # --- NEW OUTBOUND FILE PROCESSING LOGIC ---
+            # Read the CSV without a header initially to capture both header rows
+            df_raw = pd.read_csv(io.StringIO(decoded.decode('utf-8')), header=None, on_bad_lines='skip', engine='python')
+
+            # Extract the first two rows as potential headers
+            header_row1 = df_raw.iloc[0]
+            header_row2 = df_raw.iloc[1]
+
+            # Identify fixed ID columns (first 4 columns)
+            fixed_id_cols_names = ['Host Code', 'Organization Name', 'Territory Name', 'Sales Rep Full Name']
+            
+            # Create the new multi-level columns
+            new_columns = []
+            for i in range(len(header_row2)):
+                col_name_r2 = str(header_row2[i]).strip()
+                col_name_r1 = str(header_row1[i]).strip()
+
+                if i < len(fixed_id_cols_names):
+                    # These are the fixed ID columns, they don't have a month
+                    new_columns.append(fixed_id_cols_names[i])
+                else:
+                    # These are the kit/tube columns, they have a month associated
+                    # The month number is in header_row1, e.g., '1.00', '2.00'
+                    # Convert to integer month number
+                    try:
+                        month_num = int(float(col_name_r1)) # Convert '1.00' to 1
+                        new_columns.append(f"{col_name_r2}_Month_{month_num}")
+                    except ValueError:
+                        # If it's not a month number, it might be a continuation of a previous kit type
+                        # This handles cases like 'MNT Kit Only (2 ACD).1'
+                        new_columns.append(f"{col_name_r2}_Month_Unknown") # Or handle more robustly if needed
+
+
+            # Set the new columns to the DataFrame and drop the original header rows
+            df_raw.columns = new_columns
+            df = df_raw.iloc[2:].reset_index(drop=True) # Data starts from the 3rd row (index 2)
 
             # --- CRITICAL FIX: Explicitly rename core columns for outbound file ---
             # These are the columns expected to be used as 'fixed_id_cols'
-            expected_outbound_columns = {
+            expected_outbound_columns_mapping = {
                 'Host Code': 'Order_ID',
                 'Organization Name': 'Location',
                 'Territory Name': 'Location_Code',
@@ -53,7 +85,7 @@ def parse_contents(contents, filename):
             }
 
             # Only rename columns that exist in the DataFrame
-            columns_to_rename = {k: v for k, v in expected_outbound_columns.items() if k in df.columns}
+            columns_to_rename = {k: v for k, v in expected_outbound_columns_mapping.items() if k in df.columns}
             df = df.rename(columns=columns_to_rename)
 
             # Ensure the expected fixed ID columns are now present after renaming
@@ -63,85 +95,67 @@ def parse_contents(contents, filename):
                     error_message = f"Missing required column '{col}' after renaming in Outbound file. Please check your CSV header structure."
                     return None, error_message
 
-            # Drop the duplicate column if it exists, as per your original code
-            if 'MNT Kit Only (2 ACD).1' in df.columns:
-                df = df.drop(columns=['MNT Kit Only (2 ACD).1'])
+            # Now, melt the DataFrame based on the new multi-month structure
+            # Identify columns that contain month information (e.g., "_Month_1", "_Month_2")
+            # We'll use a regex pattern to find these
+            month_columns = [col for col in df.columns if re.search(r'_Month_\d+', col)]
 
-            # Extract YearMonth from filename (e.g., "out_june.csv" -> 2025-06-01)
-            # Assuming current year for the files based on 'now()'.
-            # For robust production, you might want to infer year from data or add a year input.
-            month_name_abbr = filename.split('_')[1].split('.')[0] # e.g., 'jan'
-            current_year = datetime.datetime.now().year
-
-            # More robust month parsing for various short forms
-            month_num = None
-            try:
-                month_num = datetime.datetime.strptime(month_name_abbr, '%b').month # Try 'Jan', 'Feb', etc.
-            except ValueError:
-                try:
-                    month_num = datetime.datetime.strptime(month_name_abbr, '%B').month # Try 'January', 'February', etc.
-                except ValueError:
-                    # Fallback for common short forms not covered by %b or %B
-                    month_map = {
-                        'jan': 1, 'feb': 2, 'march': 3, 'april': 4, 'may': 5, 'june': 6,
-                        'july': 7, 'aug': 8, 'sept': 9, 'oct': 10, 'nov': 11, 'dec': 12
-                    }
-                    month_num = month_map.get(month_name_abbr.lower())
-
-            if month_num is None:
-                error_message = f"Could not determine month from outbound filename: {filename}. Please ensure it follows 'out_MONTH.csv' format (e.g., out_jan.csv)."
+            if not month_columns:
+                error_message = "No month-specific kit columns found. Please ensure your outbound file has month numbers in the first header row and kit names in the second."
                 return None, error_message
 
-            df['YearMonth'] = pd.to_datetime(f"{current_year}-{month_num:02d}-01")
+            # Melt the DataFrame to transform month-specific kit columns into rows
+            # The id_vars are the fixed ID columns, plus any other non-month specific columns
+            id_vars_for_melt = [col for col in df.columns if col not in month_columns]
 
-            # Identify fixed ID columns and kit type columns
-            fixed_id_cols = ['Order_ID', 'Location', 'Location_Code', 'SalesRep', 'YearMonth']
-            # Find kit columns by checking against kit_to_tube keys
-            kit_cols = [col for col in df.columns if col not in fixed_id_cols and col in kit_to_tube]
+            df_melted_multi_month = df.melt(
+                id_vars=id_vars_for_melt,
+                var_name='KitMonthColumn', # e.g., "MNT Kit Only (2 ACD)_Month_1"
+                value_name='KitCount'
+            )
 
-            if not kit_cols:
-                error_message = "No kit type columns found matching 'kit_to_tube' keys. " \
-                                "Please ensure keys in 'kit_to_tube' exactly match actual kit column headers in your CSV."
-                return None, error_message
-
-            # Melt the DataFrame to transform kit columns into rows
-            id_vars_for_melt = [col for col in df.columns if col not in kit_cols]
-            df_melted = df.melt(id_vars=id_vars_for_melt,
-                                 var_name='KitDescription',
-                                 value_name='KitCount')
+            # Extract KitDescription and Month from 'KitMonthColumn'
+            df_melted_multi_month['KitDescription'] = df_melted_multi_month['KitMonthColumn'].apply(lambda x: x.split('_Month_')[0].strip())
+            df_melted_multi_month['YearMonth'] = df_melted_multi_month['KitMonthColumn'].apply(
+                lambda x: datetime.datetime.strptime(f"{datetime.datetime.now().year}-{x.split('_Month_')[-1].strip()}-01", '%Y-%m-%d')
+            )
 
             # Convert KitCount to numeric, handling non-numeric entries
-            df_melted['KitCount'] = pd.to_numeric(df_melted['KitCount'], errors='coerce').fillna(0)
-            df_melted = df_melted[df_melted['KitCount'] > 0] # Filter out zero or NaN counts
+            df_melted_multi_month['KitCount'] = pd.to_numeric(df_melted_multi_month['KitCount'], errors='coerce').fillna(0)
+            df_melted_multi_month = df_melted_multi_month[df_melted_multi_month['KitCount'] > 0] # Filter out zero or NaN counts
 
             # Initialize tube type columns for calculation
             for tube_type in ['ACD', 'Blue', 'Lav', 'SST']: # Define all possible tube types
-                df_melted[tube_type] = 0
+                df_melted_multi_month[tube_type] = 0
 
             # Distribute tubes based on kit_to_tube mapping
-            for index, row in df_melted.iterrows():
+            for index, row in df_melted_multi_month.iterrows():
                 kit_desc = str(row['KitDescription']) # Ensure it's a string for dictionary lookup
                 kit_count = row['KitCount']
                 if kit_desc in kit_to_tube:
                     for tube_type_in_kit, qty_per_kit in kit_to_tube[kit_desc].items():
                         # Add calculated tubes to the corresponding tube type column
-                        df_melted.at[index, tube_type_in_kit] += kit_count * qty_per_kit
+                        df_melted_multi_month.at[index, tube_type_in_kit] += kit_count * qty_per_kit
 
             # Melt again to aggregate the tube counts by tube type
-            df_outbound_tubes = df_melted.melt(
-                id_vars=[col for col in df_melted.columns if col not in ['ACD', 'Blue', 'Lav', 'SST', 'KitDescription', 'KitCount']],
+            # We need to ensure that 'KitMonthColumn' is dropped before the final melt
+            cols_to_keep_before_final_melt = [col for col in df_melted_multi_month.columns if col not in ['ACD', 'Blue', 'Lav', 'SST', 'KitDescription', 'KitCount', 'KitMonthColumn']]
+
+            df_outbound_tubes = df_melted_multi_month.melt(
+                id_vars=cols_to_keep_before_final_melt,
                 value_vars=['ACD', 'Blue', 'Lav', 'SST'],
                 var_name='TubeType',
-                value_name='TubesSent'
+                value_name='TubesSent' # Renamed for clarity as discussed
             )
             df_outbound_tubes = df_outbound_tubes[df_outbound_tubes['TubesSent'] > 0] # Keep only tubes that were sent
+            
             # Final aggregation for outbound data: sum TubesSent by Location, YearMonth, TubeType
             df_outbound_tubes = df_outbound_tubes.groupby(['Location', 'YearMonth', 'TubeType']).agg(TubesSent=('TubesSent', 'sum')).reset_index()
 
             return df_outbound_tubes, None
 
         elif is_inbound and filename.endswith(".csv"):
-            # Inbound file processing
+            # Inbound file processing (remains largely the same, but ensure 'YearMonth' is handled)
             # Assuming header is the first row and data starts from the second row
             df = pd.read_csv(io.StringIO(decoded.decode('utf-8')), header=None)
             df.columns = df.iloc[0] # Set the first row as column headers
@@ -160,16 +174,17 @@ def parse_contents(contents, filename):
                 return None, error_message
 
             # Convert 'YearMonth' to datetime, handling errors (e.g., if format is %Y%m)
+            # Assuming 'YearMonth' in inbound is like '202501', '202502'
             df['YearMonth'] = pd.to_datetime(df['YearMonth'], format='%Y%m', errors='coerce')
             df = df.dropna(subset=['YearMonth']) # Remove rows where YearMonth couldn't be parsed
 
             # Aggregate incoming samples by Location, YearMonth, and TubeType
-            df_inbound_agg = df.groupby(['Location', 'YearMonth', 'TubeType']).agg(TubesReturned=('Count', 'sum')).reset_index()
+            df_inbound_agg = df.groupby(['Location', 'YearMonth', 'TubeType']).agg(SamplesReturned=('Count', 'sum')).reset_index()
 
             return df_inbound_agg, None
 
         else:
-            return None, "Unsupported file name. Please upload 'out_MONTH.csv' or 'in_MONTH.csv'."
+            return None, "Unsupported file name. Please upload 'out_MONTH.csv' (old format), 'out_MULTI_MONTH.csv' (new format) or 'in_MONTH.csv'."
 
     except Exception as e:
         import traceback
@@ -184,7 +199,7 @@ layout = html.Div([
 
     html.Div([
         html.Div([
-            html.H3("Upload Outbound Kits Report (e.g., out_jan.csv)", style={'color': '#555'}),
+            html.H3("Upload Outbound Kits Report (e.g., out_jan.csv or multi-month format)", style={'color': '#555'}),
             dcc.Upload(
                 id='upload-outbound-data',
                 children=html.Div(['Drag and Drop or ', html.A('Select File')]),
@@ -232,7 +247,7 @@ layout = html.Div([
         columns=[{"name": i, "id": i} for i in []], # Initial empty columns
         data=[], # Initial empty data
         filter_action="native", # Enable in-table filtering
-        sort_action="native",   # Enable in-table sorting
+        sort_action="native",    # Enable in-table sorting
         style_table={'overflowX': 'auto', 'margin': '0 auto', 'width': '90%'}, # Table styling
         style_header={
             'backgroundColor': 'rgb(230, 230, 230)',
@@ -334,8 +349,8 @@ def register_callbacks(app):
                 how='outer'
             ).fillna(0) # Fill NaN values (from outer merge) with 0
 
-            # Calculate 'RemainingTubes'
-            merged_df['RemainingTubes'] = merged_df['TubesSent'] - merged_df['TubesReturned']
+            # Calculate 'RemainingKits'
+            merged_df['RemainingKits'] = merged_df['TubesSent'] - merged_df['SamplesReturned'] # Changed from KitsSent to TubesSent
             merged_df = merged_df.sort_values(by=['YearMonth', 'Location', 'TubeType']).reset_index(drop=True)
             # Create a display-friendly YearMonth column
             merged_df['YearMonth_Display'] = merged_df['YearMonth'].dt.strftime('%Y-%m')
@@ -358,10 +373,10 @@ def register_callbacks(app):
         if jsonified_data:
             df = pd.read_json(jsonified_data, orient='split')
             # Define desired column order for display
-            display_cols_order = ['Location', 'YearMonth_Display', 'TubeType', 'TubesSent', 'TubesReturned', 'RemainingTubes']
+            display_cols_order = ['Location', 'YearMonth_Display', 'TubeType', 'TubesSent', 'SamplesReturned', 'RemainingKits'] # Changed from KitsSent to TubesSent
             # Get actual columns that exist and reorder them
             final_display_columns = [col for col in display_cols_order if col in df.columns] + \
-                                   [col for col in df.columns if col not in display_cols_order and col not in ['YearMonth']] # Add any other columns that exist but aren't in desired order
+                                    [col for col in df.columns if col not in display_cols_order and col not in ['YearMonth']] # Add any other columns that exist but aren't in desired order
 
             columns = [{"name": col, "id": col} for col in final_display_columns]
             data = df.to_dict('records') # Convert DataFrame to list of dictionaries for DataTable
