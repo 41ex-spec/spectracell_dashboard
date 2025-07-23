@@ -42,9 +42,18 @@ def parse_contents(contents, filename):
             # Read the CSV without a header initially to capture both header rows
             df_raw = pd.read_csv(io.StringIO(decoded.decode('utf-8')), header=None, on_bad_lines='skip', engine='python')
 
+            # Add checks for minimum rows
+            if df_raw.empty:
+                error_message = "Outbound file is empty or contains no data rows."
+                return None, error_message
+            if len(df_raw) < 2:
+                error_message = "Outbound file has too few rows. Expected at least 2 header rows and data."
+                return None, error_message
+
             # Extract the first two rows as potential headers
-            header_row1 = df_raw.iloc[0]
-            header_row2 = df_raw.iloc[1]
+            # Use .squeeze() to ensure they are Series, not single-column DataFrames
+            header_row1 = df_raw.iloc[0].squeeze()
+            header_row2 = df_raw.iloc[1].squeeze()
 
             # Identify fixed ID columns (first 4 columns)
             fixed_id_cols_names = ['Host Code', 'Organization Name', 'Territory Name', 'Sales Rep Full Name']
@@ -68,7 +77,8 @@ def parse_contents(contents, filename):
                     except ValueError:
                         # If it's not a month number, it might be a continuation of a previous kit type
                         # This handles cases like 'MNT Kit Only (2 ACD).1'
-                        new_columns.append(f"{col_name_r2}_Month_Unknown") # Or handle more robustly if needed
+                        # Fallback to a generic name if month parsing fails
+                        new_columns.append(f"{col_name_r2}_Month_Unknown_{i}") # Added {i} to ensure uniqueness
 
 
             # Set the new columns to the DataFrame and drop the original header rows
@@ -116,9 +126,18 @@ def parse_contents(contents, filename):
 
             # Extract KitDescription and Month from 'KitMonthColumn'
             df_melted_multi_month['KitDescription'] = df_melted_multi_month['KitMonthColumn'].apply(lambda x: x.split('_Month_')[0].strip())
-            df_melted_multi_month['YearMonth'] = df_melted_multi_month['KitMonthColumn'].apply(
-                lambda x: datetime.datetime.strptime(f"{datetime.datetime.now().year}-{x.split('_Month_')[-1].strip()}-01", '%Y-%m-%d')
+            
+            # Extract month number as string first
+            df_melted_multi_month['MonthNumStr'] = df_melted_multi_month['KitMonthColumn'].apply(lambda x: x.split('_Month_')[-1].strip())
+            
+            # Construct YearMonth string and then convert to datetime
+            current_year = datetime.datetime.now().year
+            df_melted_multi_month['YearMonth'] = pd.to_datetime(
+                df_melted_multi_month.apply(lambda row: f"{current_year}-{row['MonthNumStr']}-01", axis=1),
+                errors='coerce' # Coerce errors to NaT (Not a Time)
             )
+            df_melted_multi_month = df_melted_multi_month.drop(columns=['MonthNumStr']) # Drop temp column
+            df_melted_multi_month = df_melted_multi_month.dropna(subset=['YearMonth']) # Drop rows where YearMonth couldn't be parsed
 
             # Convert KitCount to numeric, handling non-numeric entries
             df_melted_multi_month['KitCount'] = pd.to_numeric(df_melted_multi_month['KitCount'], errors='coerce').fillna(0)
