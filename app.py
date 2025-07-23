@@ -19,7 +19,7 @@ server = app.server
 app.server.secret_key = os.environ.get('SECRET_KEY', 'your_super_secret_key_here_replace_me_in_prod')
 
 # --- Simple Hardcoded User (for demonstration) ---
-VALID_PASSWORD_HASH = hashlib.sha256('Spec$314Alex'.encode('utf-8')).hexdigest()
+VALID_PASSWORD_HASH = '469c34f452736efd07e97f4e3893cb445b179b00ce0871bf329af3a7f97b5095'
 
 # Define the app layout
 app.layout = html.Div([
