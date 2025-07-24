@@ -215,6 +215,17 @@ def parse_contents(contents, filename):
 # This 'layout' variable will be imported by app.py to display this page
 layout = html.Div([
     html.H2("Monthly Kit Data Merger", style={'textAlign': 'center', 'color': '#333', 'margin-bottom': '30px'}),
+    html.P(
+        "This takes in an outbound file from HC1 named 'Kit&Tube Trend by Location & Month.csv '"
+        " and an inbound file from the SQL server named 'Count of Incoming Samples by Location.csv'.",
+        style={'textAlign': 'center', 'color': '#555', 'margin-bottom': '20px'}
+    ),
+    html.P(
+    "Ensure that your files are properly renamed for processing. "
+    "Outbound files should begin with 'out_' (e.g., out_2025.csv), "
+    "and inbound files should begin with 'in_' (e.g., in_2025.csv). "
+    "The part after the underscore typically represents the month or year.",
+    style={'textAlign': 'center', 'color': '#555', 'margin-bottom': '20px'}),
 
     html.Div([
         html.Div([
@@ -279,11 +290,12 @@ layout = html.Div([
         },
         page_size=15, # Number of rows per page
     ),
-
+    html.P("Disclaimer: The inbound dataset only includes samples returned in the form of their tube types, "
+        "so it's not possible to display the total number of kits sent out at the moment. Sorry about that! :c", style={'textAlign': 'center', 'color': '#555', 'margin-bottom': '20px'}),
     html.Button("Download Merged Report (CSV)", id="btn-download-csv",
                 style={'margin': '30px auto', 'display': 'block', 'padding': '10px 20px'}),
     dcc.Download(id="download-dataframe-csv"), # Component to trigger file download
-
+    
     html.Hr(style={'margin': '40px 0'}), # Separator for alerts section
 
     html.H2("Unused Tube Sample Alerts", style={'textAlign': 'center', 'color': '#d9534f', 'margin-bottom': '20px'}),

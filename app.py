@@ -18,7 +18,7 @@ server = app.server
 # --- Security Configuration ---
 app.server.secret_key = os.environ.get('SECRET_KEY', 'your_super_secret_key_here_replace_me_in_prod')
 
-# --- Simple Hardcoded User (for demonstration) ---
+# --- Single user ---
 VALID_PASSWORD_HASH = '469c34f452736efd07e97f4e3893cb445b179b00ce0871bf329af3a7f97b5095'
 
 # Define the app layout
