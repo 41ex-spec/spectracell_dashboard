@@ -214,7 +214,7 @@ def parse_contents(contents, filename):
 # --- Define the layout for this page ---
 # This 'layout' variable will be imported by app.py to display this page
 layout = html.Div([
-    html.H2("Single Month Kit Data Merger", style={'textAlign': 'center', 'color': '#333', 'margin-bottom': '30px'}),
+    html.H2("Monthly Kit Data Merger", style={'textAlign': 'center', 'color': '#333', 'margin-bottom': '30px'}),
 
     html.Div([
         html.Div([
@@ -283,6 +283,23 @@ layout = html.Div([
     html.Button("Download Merged Report (CSV)", id="btn-download-csv",
                 style={'margin': '30px auto', 'display': 'block', 'padding': '10px 20px'}),
     dcc.Download(id="download-dataframe-csv"), # Component to trigger file download
+
+    html.Hr(style={'margin': '40px 0'}), # Separator for alerts section
+
+    html.H2("Unused Tube Sample Alerts", style={'textAlign': 'center', 'color': '#d9534f', 'margin-bottom': '20px'}),
+    html.Div([
+        html.Label("Set Unused Tube Sample Alert Threshold:", style={'marginRight': '10px', 'fontWeight': 'bold'}),
+        dcc.Input(
+            id='alert-threshold-input',
+            type='number',
+            value=50, # Default threshold
+            min=0,
+            step=1,
+            style={'width': '100px', 'padding': '5px', 'border': '1px solid #ccc', 'borderRadius': '3px'}
+        )
+    ], style={'textAlign': 'center', 'margin-bottom': '20px'}),
+
+    html.Div(id='unused-kit-alerts', style={'margin': '0 auto', 'width': '90%', 'padding': '15px', 'border': '1px solid #f0ad4e', 'borderRadius': '5px', 'backgroundColor': '#fcf8e3'}),
 ])
 
 # --- Register Callbacks (for multi-page Dash apps) ---
@@ -391,13 +408,30 @@ def register_callbacks(app):
     def update_table(jsonified_data):
         if jsonified_data:
             df = pd.read_json(jsonified_data, orient='split')
-            # Define desired column order for display
-            display_cols_order = ['Location', 'YearMonth_Display', 'TubeType', 'TubesSent', 'SamplesReturned', 'RemainingKits'] # Changed from KitsSent to TubesSent
-            # Get actual columns that exist and reorder them
-            final_display_columns = [col for col in display_cols_order if col in df.columns] + \
-                                    [col for col in df.columns if col not in display_cols_order and col not in ['YearMonth']] # Add any other columns that exist but aren't in desired order
 
-            columns = [{"name": col, "id": col} for col in final_display_columns]
+            # Define a mapping for display names for the DataTable headers
+            column_display_names = {
+                'Location': 'Location',
+                'YearMonth_Display': 'Month',
+                'TubeType': 'Tube Type',
+                'TubesSent': 'Tubes Sent',
+                'SamplesReturned': 'Samples Returned',
+                'RemainingKits': 'Remaining Tubes' # This is the key change for display
+            }
+
+            # Define desired column order for display (using internal DataFrame column IDs)
+            internal_cols_order = ['Location', 'YearMonth_Display', 'TubeType', 'TubesSent', 'SamplesReturned', 'RemainingKits']
+
+            # Get actual columns that exist in the DataFrame and reorder them
+            # This ensures we only try to display columns that are actually in the DataFrame
+            final_display_columns_ids = [col_id for col_id in internal_cols_order if col_id in df.columns] + \
+                                        [col_id for col_id in df.columns if col_id not in internal_cols_order and col_id not in ['YearMonth']]
+
+            # Create the columns list for DataTable, using the display names mapping
+            columns = [
+                {"name": column_display_names.get(col_id, col_id), "id": col_id}
+                for col_id in final_display_columns_ids
+            ]
             data = df.to_dict('records') # Convert DataFrame to list of dictionaries for DataTable
             return columns, data
         return [], [] # Return empty if no data
@@ -422,3 +456,42 @@ def register_callbacks(app):
             # Send the DataFrame as a CSV file
             return dcc.send_data_frame(df.to_csv, filename="SpectraCell_Merged_Monthly_Report.csv", index=False)
         return None # No download if conditions not met
+
+    # --- New Callback for Unused Kit Alerts ---
+    @app.callback(
+        Output('unused-kit-alerts', 'children'),
+        Input('merged-data-store', 'data'),
+        Input('alert-threshold-input', 'value')
+    )
+    def generate_alerts(jsonified_data, threshold):
+        if not jsonified_data:
+            return html.P("Upload data to see unused tube sample alerts.", style={'color': '#8a6d3b'})
+
+        if threshold is None or threshold < 0:
+            return html.P("Please enter a valid positive threshold for alerts.", style={'color': 'red'})
+
+        df = pd.read_json(jsonified_data, orient='split')
+
+        # Filter for rows where RemainingKits exceed the threshold
+        # Group by Location and sum RemainingKits to get total unused kits per client
+        # Then filter this aggregated data
+        alerts_df = df[df['RemainingKits'] > threshold].groupby(['Location', 'YearMonth_Display']).agg(
+            TotalUnusedKits=('RemainingKits', 'sum')
+        ).reset_index()
+
+        # Sort for better readability
+        alerts_df = alerts_df.sort_values(by=['TotalUnusedKits'], ascending=False)
+
+        if alerts_df.empty:
+            return html.P(f"No clients with more than {int(threshold)} unused tube samples found.", style={'color': '#3c763d'})
+        else:
+            alert_messages = []
+            alert_messages.append(html.H4("Clients with Significant Unused Tube Samples:", style={'color': '#d9534f', 'marginBottom': '10px'}))
+            for index, row in alerts_df.iterrows():
+                message = html.P(
+                    f"⚠️ {row['Location']} (Month: {row['YearMonth_Display']}): {int(row['TotalUnusedKits'])} unused tube samples.",
+                    style={'color': '#a94442', 'fontWeight': 'bold'}
+                )
+                alert_messages.append(message)
+            return html.Div(alert_messages)
+
