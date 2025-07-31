@@ -239,8 +239,8 @@ layout = html.Div([
                     html.A('Select File', style={'color': '#007bff', 'text-decoration': 'none', 'font-weight': 'bold'})
                 ]),
                 style={
-                    'width': '100%', 'height': '80px', 'lineHeight': '80px', # Increased height
-                    'borderWidth': '2px', 'borderStyle': 'dashed', 'borderRadius': '10px', # Thicker, more rounded border
+                    'width': '100%', 'height': '80px', 'lineHeight': '80px', 
+                    'borderWidth': '2px', 'borderStyle': 'dashed', 'borderRadius': '10px', 
                     'textAlign': 'center', 'margin': '15px 0', 'cursor': 'pointer',
                     'backgroundColor': '#f9f9f9', 'transition': 'background-color 0.3s ease'
                 },
@@ -260,8 +260,8 @@ layout = html.Div([
                     html.A('Select File', style={'color': '#007bff', 'text-decoration': 'none', 'font-weight': 'bold'})
                 ]),
                 style={
-                    'width': '100%', 'height': '80px', 'lineHeight': '80px', # Increased height
-                    'borderWidth': '2px', 'borderStyle': 'dashed', 'borderRadius': '10px', # Thicker, more rounded border
+                    'width': '100%', 'height': '80px', 'lineHeight': '80px',
+                    'borderWidth': '2px', 'borderStyle': 'dashed', 'borderRadius': '10px',
                     'textAlign': 'center', 'margin': '15px 0', 'cursor': 'pointer',
                     'backgroundColor': '#f9f9f9', 'transition': 'background-color 0.3s ease'
                 },
@@ -404,6 +404,7 @@ def register_callbacks(app):
         Input('outbound-data-store', 'data'),
         Input('inbound-data-store', 'data')
     )
+    
     def merge_data(outbound_json, inbound_json):
         # Only attempt merge if both data stores contain data.
         if outbound_json is None or inbound_json is None:

@@ -177,3 +177,6 @@ login_page.register_callbacks(app)
 # Run the app locally.
 if __name__ == '__main__':
     app.run(debug=True)
+# status pages for uptime monitoring:
+# https://stats.uptimerobot.com/wNfGZD3B79
+# https://dashboard.uptimerobot.com/monitors/801068522
