@@ -31,7 +31,7 @@ app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
 
     # Main dashboard title.
-    html.H1("SpectraCell Dashboard", style={
+    html.H1("SpectraCell Kit Tracking Dashboard", style={
         'textAlign': 'center',
         'color': '#0056b3',
         'margin-bottom': '40px',
@@ -138,12 +138,14 @@ def display_page(pathname, login_data):
     elif pathname == '/login':
         # If already logged in and tries to go to /login, redirect.
         if logged_in:
-            return dcc.Location(pathname='/monthly-trends', id='redirect-after-login'), navbar_style, dash.no_update
+            # Changed default redirect after login to single-month-merger
+            return dcc.Location(pathname='/single-month-merger', id='redirect-after-login'), navbar_style, dash.no_update
         return login_page.layout, {'display': 'none'}, dash.no_update
     else:
         # Default page handling based on login status.
         if logged_in:
-            return dcc.Location(pathname='/monthly-trends', id='default-redirect'), navbar_style, dash.no_update
+            # Changed default redirect to single-month-merger
+            return dcc.Location(pathname='/single-month-merger', id='default-redirect'), navbar_style, dash.no_update
         return login_page.layout, {'display': 'none'}, dash.no_update
 
 
@@ -161,7 +163,8 @@ def authenticate(n_clicks, password):
         if password:
             hashed_password = hashlib.sha256(password.encode('utf-8')).hexdigest()
             if hashed_password == VALID_PASSWORD_HASH:
-                return "", "/monthly-trends", {'logged_in': True}
+                # Direct to single-month-merger after successful authentication
+                return "", "/single-month-merger", {'logged_in': True}
             else:
                 return html.Span("Incorrect password. Please try again.", style={'color': '#dc3545', 'fontWeight': 'bold'}), dash.no_update, {'logged_in': False}
         else:
@@ -176,8 +179,3 @@ login_page.register_callbacks(app)
 # Run the app locally.
 if __name__ == '__main__':
     app.run(debug=True)
-
-# status pages and dashboard for uptime monitoring:
-# this service monitors the uptime of various endpoints and provides a dashboard for monitoring
-# https://stats.uptimerobot.com/wNfGZD3B79
-# https://dashboard.uptimerobot.com/monitors/801068522
