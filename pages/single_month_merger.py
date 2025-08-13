@@ -6,9 +6,9 @@ import base64
 import io
 import datetime
 import re
+import plotly.express as px
 
 # Kit to tube mapping
-# IMPORTANT: These kit names must exactly match the column headers in the 'out_*.csv' files.
 kit_to_tube = {
     'MNT & Telomere Kit (2 ACD, 1 Blue Sodium Citrate)': {'ACD': 2, 'Blue': 1},
     'MNT Kit Only (2 ACD)': {'ACD': 2},
@@ -21,8 +21,8 @@ kit_to_tube = {
     'MNT & Tel. 1 Blue Sor': {'ACD': 2, 'Blue': 1},
     'MNT Kit O': {'ACD': 2},
     'Tube - ACD Tube': {'ACD': 1},
-    'Tube - Lt. LTtube': {'Blue': 1}, # Assuming 'LTtube' is a typo or shorthand for 'Lt. Blue'
-    '-SST MNT Kit Only (2 ACD)': {'SST': 1, 'ACD': 2}, # Example of a kit that might contain SST and ACD
+    'Tube - Lt. LTtube': {'Blue': 1},
+    '-SST MNT Kit Only (2 ACD)': {'SST': 1, 'ACD': 2},
 }
 
 def parse_contents(contents, filename):
@@ -50,7 +50,6 @@ def parse_contents(contents, filename):
 
             fixed_id_cols_names = ['Host Code', 'Organization Name', 'Territory Name', 'Sales Rep Full Name']
             
-            # Create the new multi-level columns based on the two header rows.
             new_columns = []
             for i in range(len(header_row2)):
                 col_name_r2 = str(header_row2[i]).strip()
@@ -63,17 +62,15 @@ def parse_contents(contents, filename):
                         month_num = int(float(col_name_r1))
                         new_columns.append(f"{col_name_r2}_Month_{month_num}")
                     except ValueError:
-                        # If not a month number, it might be a continuation of a previous kit type
                         new_columns.append(f"{col_name_r2}_Month_Unknown_{i}") 
 
-            # Set the new columns to the DataFrame and drop the original header rows.
             df_raw.columns = new_columns
             df = df_raw.iloc[2:].reset_index(drop=True)
 
             expected_outbound_columns_mapping = {
-                'Host Code': 'Order_ID', # Keep Host Code as Order_ID
+                'Host Code': 'Order_ID',
                 'Organization Name': 'Location',
-                'Territory Name': 'Outbound_Territory', # Renamed to avoid direct conflict
+                'Territory Name': 'Outbound_Territory',
                 'Sales Rep Full Name': 'SalesRep'
             }
 
@@ -92,17 +89,13 @@ def parse_contents(contents, filename):
                 error_message = "No month-specific kit columns found. Please ensure your outbound file has month numbers in the first header row and kit names in the second."
                 return None, error_message
 
-            # Melt the DataFrame to transform month-specific kit columns into rows.
-            id_vars_for_melt = [col for col in df.columns if col not in month_columns]
-
             df_melted_multi_month = df.melt(
-                id_vars=id_vars_for_melt,
-                var_name='KitMonthColumn', # e.g., "MNT Kit Only (2 ACD)_Month_1"
+                id_vars=[col for col in df.columns if col not in month_columns],
+                var_name='KitMonthColumn',
                 value_name='KitCount'
             )
 
             df_melted_multi_month['KitDescription'] = df_melted_multi_month['KitMonthColumn'].apply(lambda x: x.split('_Month_')[0].strip())
-            
             df_melted_multi_month['MonthNumStr'] = df_melted_multi_month['KitMonthColumn'].apply(lambda x: x.split('_Month_')[-1].strip())
             
             current_year = datetime.datetime.now().year
@@ -114,21 +107,18 @@ def parse_contents(contents, filename):
             df_melted_multi_month = df_melted_multi_month.dropna(subset=['YearMonth'])
 
             df_melted_multi_month['KitCount'] = pd.to_numeric(df_melted_multi_month['KitCount'], errors='coerce').fillna(0)
-            df_melted_multi_month = df_melted_multi_month[df_melted_multi_month['KitCount'] > 0] # Filter out zero or NaN counts.
+            df_melted_multi_month = df_melted_multi_month[df_melted_multi_month['KitCount'] > 0]
 
-            # Initialize tube type columns for calculation.
             for tube_type in ['ACD', 'Blue', 'Lav', 'SST']:
                 df_melted_multi_month[tube_type] = 0
 
-            # Distribute tubes based on kit_to_tube mapping.
             for index, row in df_melted_multi_month.iterrows():
-                kit_desc = str(row['KitDescription']) # Ensure it's a string for dictionary lookup.
+                kit_desc = str(row['KitDescription'])
                 kit_count = row['KitCount']
                 if kit_desc in kit_to_tube:
                     for tube_type_in_kit, qty_per_kit in kit_to_tube[kit_desc].items():
                         df_melted_multi_month.at[index, tube_type_in_kit] += kit_count * qty_per_kit
 
-            # Ensure that 'KitMonthColumn', 'KitDescription', and 'KitCount' are dropped before the final melt.
             cols_to_keep_before_final_melt = [col for col in df_melted_multi_month.columns if col not in ['ACD', 'Blue', 'Lav', 'SST', 'KitDescription', 'KitCount', 'KitMonthColumn']]
 
             df_outbound_tubes = df_melted_multi_month.melt(
@@ -140,55 +130,42 @@ def parse_contents(contents, filename):
             df_outbound_tubes = df_outbound_tubes[df_outbound_tubes['TubesSent'] > 0]
 
             df_outbound_tubes = df_outbound_tubes.groupby(['Location', 'YearMonth', 'TubeType', 'Order_ID', 'Outbound_Territory']).agg(TubesSent=('TubesSent', 'sum')).reset_index()
-            # Add a placeholder for Location_ID in outbound data since it might not have it
-            df_outbound_tubes['Location_ID'] = pd.NA # Use pandas Not Applicable for missing IDs
+            df_outbound_tubes['Location_ID'] = pd.NA
 
             return df_outbound_tubes, None
 
         elif is_inbound and filename.endswith(".csv"):
-            # Inbound file processing.
-            # Assuming header is the first row and data starts from the second row.
             df = pd.read_csv(io.StringIO(decoded.decode('utf-8')), header=None)
-            df.columns = df.iloc[0] # Set the first row as column headers.
-            df = df[1:] # Remove the first row (now the header).
+            df.columns = df.iloc[0]
+            df = df[1:]
             
-            df.columns = df.columns.str.strip() # Clean column names.
+            df.columns = df.columns.str.strip()
 
-            # Define a mapping for renaming columns in the inbound file.
-            # This handles original column names that might differ from the standardized names.
             inbound_column_mapping = {
-                'LID': 'Location_ID', # Map 'LID' to 'Location_ID'
-                'Territory': 'Inbound_Territory', # Map 'Territory' to 'Inbound_Territory'
-                'color': 'TubeType', # Map 'color' to 'TubeType'
-                'Num': 'Count'       # Map 'Num' to 'Count'
+                'LID': 'Location_ID',
+                'Territory': 'Inbound_Territory',
+                'color': 'TubeType',
+                'Num': 'Count'
             }
             
-            # Rename columns based on the mapping, but only if they exist in the DataFrame.
             df = df.rename(columns={k: v for k, v in inbound_column_mapping.items() if k in df.columns})
-            
-            df['Count'] = pd.to_numeric(df['Count'], errors='coerce').fillna(0) # Ensure count is numeric.
+            df['Count'] = pd.to_numeric(df['Count'], errors='coerce').fillna(0)
 
-            # Check for essential columns after renaming.
             if 'YearMonth' not in df.columns:
                 error_message = "Missing 'YearMonth' column in Incoming file. Please check its header."
                 return None, error_message
-            if 'Location_ID' not in df.columns: # Now checking for 'Location_ID' after potential rename from 'LID'
+            if 'Location_ID' not in df.columns:
                  error_message = "Missing 'Location_ID' column in Incoming file. Please check its header."
                  return None, error_message
-            if 'Inbound_Territory' not in df.columns: # Now checking for 'Inbound_Territory' after potential rename from 'Territory'
+            if 'Inbound_Territory' not in df.columns:
                  error_message = "Missing 'Inbound_Territory' column in Incoming file. Please check its header."
                  return None, error_message
 
-            # Convert 'YearMonth' to datetime, handling errors (e.g., if format is %Y%m).
-            # Assuming 'YearMonth' in inbound is like '202501', '202502'.
             df['YearMonth'] = pd.to_datetime(df['YearMonth'], format='%Y%m', errors='coerce')
-            df = df.dropna(subset=['YearMonth']) # Remove rows where YearMonth couldn't be parsed.
+            df = df.dropna(subset=['YearMonth'])
             
-            # Convert Location_ID to numeric, coercing errors to NaN
             df['Location_ID'] = pd.to_numeric(df['Location_ID'], errors='coerce')
 
-
-            # Aggregate incoming samples by Location_ID, Location, YearMonth, TubeType, and Inbound_Territory.
             df_inbound_agg = df.groupby(['Location_ID', 'Location', 'YearMonth', 'TubeType', 'Inbound_Territory']).agg(SamplesReturned=('Count', 'sum')).reset_index()
 
             return df_inbound_agg, None
@@ -198,7 +175,7 @@ def parse_contents(contents, filename):
 
     except Exception as e:
         import traceback
-        traceback.print_exc() # Print full traceback to console for detailed debugging.
+        traceback.print_exc()
         print(f"Error parsing file {filename}: {e}")
         return None, f"Error processing {filename}. Please check file format and column names: {e}"
 
@@ -234,8 +211,8 @@ layout = html.Div([
                     'textAlign': 'center', 'margin': '15px 0', 'cursor': 'pointer',
                     'backgroundColor': '#f9f9f9', 'transition': 'background-color 0.3s ease'
                 },
-                multiple=False, # Only allow one file at a time.
-                accept='.csv'    # Only accept CSV files.
+                multiple=False,
+                accept='.csv'
             ),
             html.Div(id='outbound-upload-status', style={'color': 'green', 'textAlign': 'center', 'margin-top': '10px', 'font-weight': 'bold'}),
         ], style={'width': '48%', 'display': 'inline-block', 'verticalAlign': 'top', 'marginRight': '2%', 'padding': '15px', 'border': '1px solid #ddd', 'borderRadius': '8px', 'boxShadow': '0 2px 5px rgba(0,0,0,0.05)'}),
@@ -260,22 +237,20 @@ layout = html.Div([
             ),
             html.Div(id='inbound-upload-status', style={'color': 'green', 'textAlign': 'center', 'margin-top': '10px', 'font-weight': 'bold'}),
         ], style={'width': '48%', 'display': 'inline-block', 'verticalAlign': 'top', 'marginLeft': '2%', 'padding': '15px', 'border': '1px solid #ddd', 'borderRadius': '8px', 'boxShadow': '0 2px 5px rgba(0,0,0,0.05)'}),
-    ], style={'display': 'flex', 'justifyContent': 'center', 'margin-bottom': '40px', 'gap': '20px'}), # Added gap for spacing
+    ], style={'display': 'flex', 'justifyContent': 'center', 'margin-bottom': '40px', 'gap': '20px'}),
 
     html.Div(id='merge-status', style={'textAlign': 'center', 'margin-bottom': '30px', 'font-weight': 'bold', 'font-size': '1.1em', 'color': '#007bff'}),
 
-    # dcc.Store components are used to temporarily store data in the browser's memory.
-    # This prevents re-processing files unnecessarily and allows data to be shared between callbacks.
     dcc.Store(id='outbound-data-store'),
     dcc.Store(id='inbound-data-store'),
     dcc.Store(id='merged-data-store'),
+    dcc.Store(id='aggregated-data-store'),
 
-    html.Hr(style={'margin': '50px 0', 'borderTop': '1px solid #eee'}), # Horizontal rule for visual separation
+    html.Hr(style={'margin': '50px 0', 'borderTop': '1px solid #eee'}),
 
     html.H2("Merged Kit Data Table", style={'textAlign': 'center', 'color': '#333', 'margin-bottom': '25px'}),
     dash_table.DataTable(
         id='data-table',
-        # Columns now explicitly define 'id' for derived_virtual_data to work correctly
         columns=[
             {"name": "Location ID", "id": "Location_ID"},
             {"name": "Location Name", "id": "Location"},
@@ -284,13 +259,13 @@ layout = html.Div([
             {"name": "Tube Type", "id": "TubeType"},
             {"name": "Tubes Sent", "id": "TubesSent"},
             {"name": "Samples Returned", "id": "SamplesReturned"},
-            {"name": "Remaining Tubes", "id": "RemainingKits"}
+            {"name": "Stock volume (Remaining Tubes)", "id": "RemainingKits"}
         ],
-        data=[], # Initial empty data.
-        filter_action="native", # Enable in-table filtering.
-        sort_action="native",    # Enable in-table sorting.
-        page_action="native",    # Enable native pagination
-        style_table={'overflowX': 'auto', 'margin': '0 auto', 'width': '90%', 'boxShadow': '0 4px 8px rgba(0,0,0,0.1)', 'borderRadius': '8px'}, # Table styling.
+        data=[],
+        filter_action="native",
+        sort_action="native",
+        page_action="native",
+        style_table={'overflowX': 'auto', 'margin': '0 auto', 'width': '90%', 'boxShadow': '0 4px 8px rgba(0,0,0,0.1)', 'borderRadius': '8px'},
         style_header={
             'backgroundColor': '#e9ecef', 
             'fontWeight': 'bold',
@@ -301,16 +276,16 @@ layout = html.Div([
         style_cell={
             'textAlign': 'left',
             'padding': '10px',
-            'minWidth': '90px', 'width': '120px', 'maxWidth': '200px', # Adjusted cell width.
-            'borderBottom': '1px solid #f2f2f2' # Lighter cell border.
+            'minWidth': '90px', 'width': '120px', 'maxWidth': '200px',
+            'borderBottom': '1px solid #f2f2f2'
         },
         style_data_conditional=[
             {
                 'if': {'row_index': 'odd'},
-                'backgroundColor': 'rgb(250, 250, 250)' # Zebra striping for rows.
+                'backgroundColor': 'rgb(250, 250, 250)'
             }
         ],
-        page_size=15, # Number of rows per page.
+        page_size=15,
     ),
     html.P(
         "Disclaimer: The inbound dataset only includes samples returned in the form of their tube types, "
@@ -325,29 +300,53 @@ layout = html.Div([
                     'fontWeight': 'bold', 'boxShadow': '0 2px 5px rgba(0,0,0,0.2)',
                     'transition': 'background-color 0.3s ease'
                 }),
-    dcc.Download(id="download-dataframe-csv"), # Component to trigger file download.
+    dcc.Download(id="download-dataframe-csv"),
     
-    html.Hr(style={'margin': '50px 0', 'borderTop': '1px solid #eee'}), # Separator for alerts section.
+    html.Hr(style={'margin': '50px 0', 'borderTop': '1px solid #eee'}),
 
-    html.H2("Unused Tube Sample Alerts", style={'textAlign': 'center', 'color': '#dc3545', 'margin-bottom': '25px'}),
+    html.H2("Total Remaining Tubes Per Client (All Months - Excluding DTC)", style={'textAlign': 'center', 'color': '#333', 'margin-bottom': '25px'}),
     html.Div([
-        html.Label("Set Unused Tube Sample Alert Threshold:", style={'marginRight': '15px', 'fontWeight': 'bold', 'font-size': '1.05em'}),
-        dcc.Input(
-            id='alert-threshold-input',
-            type='number',
-            value=50, # Default threshold.
-            min=0,
-            step=1,
-            style={'width': '120px', 'padding': '8px', 'border': '1px solid #ced4da', 'borderRadius': '5px', 'fontSize': '1em'}
-        )
-    ], style={'textAlign': 'center', 'margin-bottom': '30px', 'display': 'flex', 'justifyContent': 'center', 'alignItems': 'center'}),
+        html.Div([
+            html.Label("Top N Clients for Chart:", style={'marginRight': '10px', 'fontWeight': 'bold'}),
+            dcc.Input(
+                id='top-n-clients-input',
+                type='number',
+                value=10,
+                min=1,
+                step=1,
+                style={'width': '80px', 'padding': '5px', 'border': '1px solid #ced4da', 'borderRadius': '5px'}
+            )
+        ], style={'textAlign': 'center', 'marginBottom': '20px', 'display': 'flex', 'justifyContent': 'center', 'alignItems': 'center'}),
+        dcc.Graph(id='total-remaining-tubes-chart', style={'margin': '0 auto', 'width': '90%', 'height': '400px', 'boxShadow': '0 2px 5px rgba(0,0,0,0.05)', 'borderRadius': '8px'}),
+    ], style={'padding': '20px', 'border': '1px solid #ddd', 'borderRadius': '8px', 'backgroundColor': '#f9f9f9', 'boxShadow': '0 2px 5px rgba(0,0,0,0.05)'}),
 
-    html.Div(id='unused-kit-alerts', style={'margin': '0 auto', 'width': '90%', 'padding': '20px', 'border': '1px solid #ffc107', 'borderRadius': '8px', 'backgroundColor': '#fff3cd', 'boxShadow': '0 2px 5px rgba(0,0,0,0.05)'}), # Enhanced alert box styling.
-], style={'fontFamily': 'Inter, sans-serif', 'padding': '20px', 'backgroundColor': '#f8f9fa'}) # Overall page styling.
+    html.Div([
+        html.H3("Summary Table (All Months - Excluding DTC)", style={'textAlign': 'center', 'color': '#555', 'margin-top': '40px', 'margin-bottom': '20px'}),
+        dash_table.DataTable(
+            id='aggregated-data-table',
+            columns=[{"name": i, "id": i} for i in []],
+            data=[],
+            filter_action="native",
+            sort_action="native",
+            page_size=10,
+            style_table={'overflowX': 'auto', 'margin': '0 auto', 'width': '90%', 'boxShadow': '0 4px 8px rgba(0,0,0,0.1)', 'borderRadius': '8px'},
+            style_header={'backgroundColor': '#e9ecef', 'fontWeight': 'bold', 'textAlign': 'center', 'borderBottom': '2px solid #dee2e6', 'padding': '12px'},
+            style_cell={'textAlign': 'left', 'padding': '10px', 'minWidth': '90px', 'width': '120px', 'maxWidth': '200px', 'borderBottom': '1px solid #f2f2f2'},
+            style_data_conditional=[{'if': {'row_index': 'odd'}, 'backgroundColor': 'rgb(250, 250, 250)'}],
+        ),
+        html.Button("Download Total Remaining Tubes Report (CSV)", id="btn-download-aggregated-csv",
+                style={
+                    'margin': '40px auto', 'display': 'block', 'padding': '12px 25px',
+                    'backgroundColor': '#28a745', 'color': 'white', 'border': 'none',
+                    'borderRadius': '5px', 'cursor': 'pointer', 'fontSize': '1.1em',
+                    'fontWeight': 'bold', 'boxShadow': '0 2px 5px rgba(0,0,0,0.2)',
+                    'transition': 'background-color 0.3s ease'
+                }),
+        dcc.Download(id="download-aggregated-dataframe-csv"),
+    ], style={'padding': '20px', 'marginTop': '40px', 'border': '1px solid #ddd', 'borderRadius': '8px', 'backgroundColor': '#f9f9f9', 'boxShadow': '0 2px 5px rgba(0,0,0,0.05)'}),
 
-# --- Register Callbacks (for multi-page Dash apps) ---
-# This function is called by the main app.py to register all interactive callbacks
-# specific to this page with the main Dash application instance.
+], style={'fontFamily': 'Inter, sans-serif', 'padding': '20px', 'backgroundColor': '#f8f9fa'})
+
 def register_callbacks(app):
     @app.callback(
         Output('outbound-data-store', 'data'),
@@ -366,31 +365,27 @@ def register_callbacks(app):
         inbound_status = ""
 
         ctx = dash.callback_context
-        # Check if any input triggered the callback.
         if not ctx.triggered:
             return dash.no_update, dash.no_update, "No Outbound file uploaded yet.", "No Inbound file uploaded yet."
 
-        # Determine which upload triggered the callback.
         trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
 
         if trigger_id == 'upload-outbound-data' and outbound_contents:
             df, err = parse_contents(outbound_contents, outbound_filename)
             if err:
                 outbound_status = html.Span(f"Error: {err}", style={'color': 'red'})
-                outbound_json = None # Clear previous data if error.
+                outbound_json = None
             elif df is not None:
-                # Convert YearMonth to string before storing in JSON for consistency.
                 if 'YearMonth' in df.columns:
                     df['YearMonth'] = df['YearMonth'].dt.date.astype(str)
-                outbound_json = df.to_json(orient='split') # Store DataFrame as JSON string.
+                outbound_json = df.to_json(orient='split')
                 outbound_status = html.Span(f"Outbound: {outbound_filename} loaded.", style={'color': 'green'})
         elif trigger_id == 'upload-inbound-data' and inbound_contents:
             df, err = parse_contents(inbound_contents, inbound_filename)
             if err:
                 inbound_status = html.Span(f"Error: {err}", style={'color': 'red'})
-                inbound_json = None # Clear previous data if error.
+                inbound_json = None
             elif df is not None:
-                # Convert YearMonth to string before storing.
                 if 'YearMonth' in df.columns:
                     df['YearMonth'] = df['YearMonth'].dt.date.astype(str)
                 inbound_json = df.to_json(orient='split')
@@ -407,57 +402,39 @@ def register_callbacks(app):
     )
     
     def merge_data(outbound_json, inbound_json):
-        # Only attempt merge if both data stores contain data.
         if outbound_json is None or inbound_json is None:
             return None, html.Span("Upload both files to see merged data.", style={'color': '#6c757d'})
 
         try:
-            # Read JSON data back into Pandas DataFrames.
             df_outbound_tubes = pd.read_json(outbound_json, orient='split')
             df_inbound_agg = pd.read_json(inbound_json, orient='split')
 
-            # Convert 'YearMonth' columns back to datetime objects for merging.
             for df_temp in [df_outbound_tubes, df_inbound_agg]:
                 if 'YearMonth' in df_temp.columns:
                     df_temp['YearMonth'] = pd.to_datetime(df_temp['YearMonth'])
 
-            # Perform the outer merge to include all locations/tube types present in either file.
-            # Merging on Location, YearMonth, TubeType.
-            # We'll then handle Location_ID and Territory_Name consolidation.
             merged_df = pd.merge(
                 df_outbound_tubes,
                 df_inbound_agg,
                 on=['Location', 'YearMonth', 'TubeType'],
                 how='outer',
-                suffixes=('_out', '_in') # Add suffixes to handle duplicate column names if they exist in both
+                suffixes=('_out', '_in')
             )
 
-            # Consolidate Location_ID: Prefer inbound Location_ID, then fallback to Outbound Order_ID (Host Code)
-            # The 'Order_ID' column from df_outbound_tubes is not suffixed if it's not part of the 'on' merge keys
-            # and there's no name conflict with inbound.
-            # So, we check if 'Order_ID' exists directly.
             if 'Order_ID' in merged_df.columns:
-                # Convert Location_ID_in to same type as Order_ID before fillna to avoid dtype issues
                 merged_df['Location_ID'] = merged_df['Location_ID_in'].fillna(merged_df['Order_ID'])
             else:
-                merged_df['Location_ID'] = merged_df['Location_ID_in'] # Fallback if Order_ID isn't present for some reason
+                merged_df['Location_ID'] = merged_df['Location_ID_in']
             
-            # Consolidate Territory_Name: Prefer inbound territory, fallback to outbound if inbound is missing.
-            # Use .combine_first() which fills NaNs in the first series with values from the second.
             merged_df['Territory_Name'] = merged_df['Inbound_Territory'].combine_first(merged_df['Outbound_Territory'])
             
-            # Fill NaN values (from outer merge) for numerical columns with 0.
-            # Use a list of columns that should be filled with 0.
             cols_to_fill_zero = ['TubesSent', 'SamplesReturned']
             for col in cols_to_fill_zero:
                 if col in merged_df.columns:
                     merged_df[col] = merged_df[col].fillna(0)
 
-            # Calculate 'RemainingKits' (now 'RemainingTubes').
             merged_df['RemainingKits'] = merged_df['TubesSent'] - merged_df['SamplesReturned']
             
-            # Drop the intermediate columns used for consolidation
-            # Ensure 'Order_ID' is included in the drop list now that it's used as a fallback
             columns_to_drop = [
                 'Location_ID_out', 'Location_ID_in', 'Outbound_Territory', 'Inbound_Territory', 'Order_ID'
             ]
@@ -467,21 +444,16 @@ def register_callbacks(app):
             ])
 
             merged_df = merged_df.sort_values(by=['YearMonth', 'Location', 'TubeType']).reset_index(drop=True)
-            # Create a display-friendly YearMonth column.
             merged_df['YearMonth_Display'] = merged_df['YearMonth'].dt.strftime('%Y-%m')
 
-            # Reorder columns for display if needed.
-            # Put Location_ID right after Location for better visibility.
             final_cols = ['Location_ID', 'Location', 'Territory_Name', 'YearMonth', 'YearMonth_Display', 'TubeType', 'TubesSent', 'SamplesReturned', 'RemainingKits']
             merged_df = merged_df[[col for col in final_cols if col in merged_df.columns]]
 
-
-            # Store the merged DataFrame as JSON for other callbacks to access.
             return merged_df.to_json(date_format='iso', orient='split'), html.Span("Data merged and processed successfully!", style={'color': '#28a745'})
 
         except Exception as e:
             import traceback
-            traceback.print_exc() # Print full traceback to console.
+            traceback.print_exc()
             print(f"Error during merge: {e}")
             return None, html.Span(f"An error occurred during merge: {e}", style={'color': 'red'})
 
@@ -494,8 +466,6 @@ def register_callbacks(app):
         if jsonified_data:
             df = pd.read_json(jsonified_data, orient='split')
 
-            # Define a mapping for display names for the DataTable headers.
-            # Ensure all columns passed to the DataTable have an 'id' property.
             column_definitions = [
                 {"name": "Location ID", "id": "Location_ID"},
                 {"name": "Location Name", "id": "Location"},
@@ -504,76 +474,134 @@ def register_callbacks(app):
                 {"name": "Tube Type", "id": "TubeType"},
                 {"name": "Tubes Sent", "id": "TubesSent"},
                 {"name": "Samples Returned", "id": "SamplesReturned"},
-                {"name": "Remaining Tubes", "id": "RemainingKits"}
+                {"name": "Stock volume (Remaining Tubes)", "id": "RemainingKits"}
             ]
 
-            # Filter columns to only include those present in the DataFrame.
-            # This ensures that if a column like 'Location_ID' is entirely NaN and thus dropped by default by
-            # pandas.to_dict('records') or if it simply doesn't exist for some reason, the DataTable still renders.
             actual_columns = [col_def for col_def in column_definitions if col_def['id'] in df.columns]
 
-            data = df.to_dict('records') # Convert DataFrame to list of dictionaries for DataTable.
+            data = df.to_dict('records')
             return actual_columns, data
-        return [], [] # Return empty if no data.
+        return [], []
 
     @app.callback(
         Output("download-dataframe-csv", "data"),
         Input("btn-download-csv", "n_clicks"),
-        State('data-table', 'derived_virtual_data'), # Use derived_virtual_data for filtered view
+        State('data-table', 'derived_virtual_data'),
         prevent_initial_call=True, 
     )
     def download_csv(n_clicks, derived_virtual_data): 
         if n_clicks and derived_virtual_data:
-            # Convert the list of dictionaries (derived_virtual_data) back to a DataFrame
             df = pd.DataFrame.from_records(derived_virtual_data)
             
-            # Ensure YearMonth is in YYYY-MM format for the downloaded CSV.
             if 'YearMonth' in df.columns and pd.api.types.is_string_dtype(df['YearMonth']):
                 df['YearMonth'] = pd.to_datetime(df['YearMonth'], errors='coerce')
             if 'YearMonth' in df.columns and pd.api.types.is_datetime64_any_dtype(df['YearMonth']):
                 df['YearMonth'] = df['YearMonth'].dt.strftime('%Y-%m')
-            # Remove the 'YearMonth_Display' column if it exists, as 'YearMonth' is now formatted for CSV.
             if 'YearMonth_Display' in df.columns:
                 df = df.drop(columns=['YearMonth_Display'])
-            # Send the DataFrame as a CSV file.
             return dcc.send_data_frame(df.to_csv, filename="SpectraCell_Merged_Monthly_Report_Filtered.csv", index=False)
         return None 
 
-    # --- New Callback for Unused Kit Alerts ---
     @app.callback(
-        Output('unused-kit-alerts', 'children'),
-        Input('merged-data-store', 'data'),
-        Input('alert-threshold-input', 'value')
+        Output('aggregated-data-store', 'data'),
+        Input('merged-data-store', 'data')
     )
-    def generate_alerts(jsonified_data, threshold):
-        if not jsonified_data:
-            return html.P("Upload data to see unused tube sample alerts.", style={'color': '#6c757d', 'font-style': 'italic'})
+    def calculate_aggregated_data(merged_json):
+        if merged_json:
+            df = pd.read_json(merged_json, orient='split')
+            
+            # Filter out DTC entries before aggregation
+            if 'Location' in df.columns and 'Territory_Name' in df.columns:
+                non_dtc_df = df[
+                    ~df['Location'].astype(str).str.contains('DTC', case=False, na=False) &
+                    ~df['Territory_Name'].astype(str).str.contains('DTC', case=False, na=False)
+                ].copy()
+            elif 'Location' in df.columns:
+                 non_dtc_df = df[~df['Location'].astype(str).str.contains('DTC', case=False, na=False)].copy()
+            elif 'Territory_Name' in df.columns:
+                 non_dtc_df = df[~df['Territory_Name'].astype(str).str.contains('DTC', case=False, na=False)].copy()
+            else:
+                non_dtc_df = df.copy()
 
-        if threshold is None or threshold < 0:
-            return html.P("Please enter a valid positive threshold for alerts.", style={'color': '#dc3545', 'font-weight': 'bold'})
+            groupby_cols = [col for col in ['Location_ID', 'Location', 'Territory_Name'] if col in non_dtc_df.columns]
+            
+            if not groupby_cols:
+                return None
 
-        df = pd.read_json(jsonified_data, orient='split')
+            aggregated_df = non_dtc_df.groupby(groupby_cols).agg(
+                TotalRemainingTubes=('RemainingKits', 'sum')
+            ).reset_index()
+            
+            aggregated_df = aggregated_df.sort_values(by='TotalRemainingTubes', ascending=False)
+            
+            return aggregated_df.to_json(orient='split')
+        return None
 
-        # Filter for rows where RemainingKits exceed the threshold.
-        # Group by Location and sum RemainingKits to get total unused kits per client.
-        # Then filter this aggregated data.
-        alerts_df = df[df['RemainingKits'] > threshold].groupby(['Location', 'YearMonth_Display']).agg(
-            TotalUnusedKits=('RemainingKits', 'sum')
-        ).reset_index()
+    @app.callback(
+        Output('total-remaining-tubes-chart', 'figure'),
+        Input('aggregated-data-store', 'data'),
+        Input('top-n-clients-input', 'value')
+    )
+    def update_total_remaining_chart(aggregated_json, top_n):
+        if aggregated_json:
+            aggregated_df = pd.read_json(aggregated_json, orient='split')
+            
+            if top_n is None or top_n <= 0:
+                top_n = 10
 
-        # Sort for better readability.
-        alerts_df = alerts_df.sort_values(by=['TotalUnusedKits'], ascending=False)
+            df_to_plot = aggregated_df.head(top_n)
 
-        if alerts_df.empty:
-            return html.P(f"No clients with more than {int(threshold)} unused tube samples found.", style={'color': '#28a744', 'font-weight': 'bold'})
-        else:
-            alert_messages = []
-            alert_messages.append(html.H4("Clients with Significant Unused Tube Samples:", style={'color': '#dc3545', 'marginBottom': '15px', 'borderBottom': '1px solid #f5c6cb', 'paddingBottom': '10px'}))
-            for index, row in alerts_df.iterrows():
-                message = html.P(
-                    f"⚠️ {row['Location']} (Month: {row['YearMonth_Display']}): {int(row['TotalUnusedKits'])} unused tube samples.",
-                    style={'color': '#721c24', 'fontWeight': 'bold', 'backgroundColor': '#f8d7da', 'padding': '10px', 'borderRadius': '5px', 'marginBottom': '8px', 'borderLeft': '5px solid #dc3545'}
-                )
-                alert_messages.append(message)
-            return html.Div(alert_messages)
+            if df_to_plot.empty:
+                return {}
 
+            fig = px.bar(
+                df_to_plot,
+                x='Location',
+                y='TotalRemainingTubes',
+                title=f'Top {top_n} Clients by Total Stock Volume (Excluding DTC)',
+                labels={'Location': 'Client/Location', 'TotalRemainingTubes': 'Total Stock Volume (Remaining Tubes)'},
+                hover_data=['Location_ID', 'Territory_Name', 'TotalRemainingTubes']
+            )
+            fig.update_layout(
+                xaxis={'categoryorder': 'total descending'},
+                margin={'l': 40, 'b': 40, 't': 50, 'r': 0},
+                plot_bgcolor='#f9f9f9',
+                paper_bgcolor='#f9f9f9',
+                font=dict(family="Inter, sans-serif", size=12, color="#333"),
+                title_font_size=16
+            )
+            return fig
+        return {}
+
+    @app.callback(
+        Output('aggregated-data-table', 'columns'),
+        Output('aggregated-data-table', 'data'),
+        Input('aggregated-data-store', 'data')
+    )
+    def update_aggregated_table(aggregated_json):
+        if aggregated_json:
+            aggregated_df = pd.read_json(aggregated_json, orient='split')
+
+            columns_agg_def = [
+                {"name": "Location ID", "id": "Location_ID"},
+                {"name": "Location Name", "id": "Location"},
+                {"name": "Territory", "id": "Territory_Name"},
+                {"name": "Total Stock Volume (All Months)", "id": "TotalRemainingTubes"},
+            ]
+            
+            actual_columns_agg = [col_def for col_def in columns_agg_def if col_def['id'] in aggregated_df.columns]
+            data_agg = aggregated_df.to_dict('records')
+            return actual_columns_agg, data_agg
+        return [], []
+
+    @app.callback(
+        Output("download-aggregated-dataframe-csv", "data"),
+        Input("btn-download-aggregated-csv", "n_clicks"),
+        State('aggregated-data-table', 'derived_virtual_data'),
+        prevent_initial_call=True,
+    )
+    def download_aggregated_csv(n_clicks, derived_virtual_data_agg):
+        if n_clicks and derived_virtual_data_agg:
+            df_agg = pd.DataFrame.from_records(derived_virtual_data_agg)
+            return dcc.send_data_frame(df_agg.to_csv, filename="SpectraCell_Total_Remaining_Tubes_Report_Filtered.csv", index=False)
+        return None

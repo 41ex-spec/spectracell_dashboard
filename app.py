@@ -20,7 +20,6 @@ server = app.server
 app.server.secret_key = os.environ.get('SECRET_KEY', 'your_super_secret_key_here_replace_me_in_prod')
 
 # --- Basic Single-User Authentication ---
-# Hardcoded password hash for demonstration purposes.
 VALID_PASSWORD_HASH = '469c34f452736efd07e97f4e3893cb445b179b00ce0871bf329af3a7f97b5095'
 
 # Define the main application layout.
