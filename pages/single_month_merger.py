@@ -71,7 +71,7 @@ def parse_contents(contents, filename):
             df = df_raw.iloc[2:].reset_index(drop=True)
 
             expected_outbound_columns_mapping = {
-                'Host Code': 'Order_ID',
+                'Host Code': 'Order_ID', # Keep Host Code as Order_ID
                 'Organization Name': 'Location',
                 'Territory Name': 'Outbound_Territory', # Renamed to avoid direct conflict
                 'Sales Rep Full Name': 'SalesRep'
@@ -139,7 +139,7 @@ def parse_contents(contents, filename):
             )
             df_outbound_tubes = df_outbound_tubes[df_outbound_tubes['TubesSent'] > 0]
 
-            df_outbound_tubes = df_outbound_tubes.groupby(['Location', 'YearMonth', 'TubeType', 'Outbound_Territory']).agg(TubesSent=('TubesSent', 'sum')).reset_index()
+            df_outbound_tubes = df_outbound_tubes.groupby(['Location', 'YearMonth', 'TubeType', 'Order_ID', 'Outbound_Territory']).agg(TubesSent=('TubesSent', 'sum')).reset_index()
             # Add a placeholder for Location_ID in outbound data since it might not have it
             df_outbound_tubes['Location_ID'] = pd.NA # Use pandas Not Applicable for missing IDs
 
@@ -429,13 +429,19 @@ def register_callbacks(app):
                 df_inbound_agg,
                 on=['Location', 'YearMonth', 'TubeType'],
                 how='outer',
-                suffixes=('_out', '_in') # Add suffixes to handle duplicate column names
+                suffixes=('_out', '_in') # Add suffixes to handle duplicate column names if they exist in both
             )
 
-            # Consolidate Location_ID: Prefer inbound Location_ID, otherwise keep it blank (pd.NA).
-            # The 'Location_ID_out' column from outbound will be all pd.NA as per parse_contents modification.
-            merged_df['Location_ID'] = merged_df['Location_ID_in'] # Prefer inbound numeric ID
-
+            # Consolidate Location_ID: Prefer inbound Location_ID, then fallback to Outbound Order_ID (Host Code)
+            # The 'Order_ID' column from df_outbound_tubes is not suffixed if it's not part of the 'on' merge keys
+            # and there's no name conflict with inbound.
+            # So, we check if 'Order_ID' exists directly.
+            if 'Order_ID' in merged_df.columns:
+                # Convert Location_ID_in to same type as Order_ID before fillna to avoid dtype issues
+                merged_df['Location_ID'] = merged_df['Location_ID_in'].fillna(merged_df['Order_ID'])
+            else:
+                merged_df['Location_ID'] = merged_df['Location_ID_in'] # Fallback if Order_ID isn't present for some reason
+            
             # Consolidate Territory_Name: Prefer inbound territory, fallback to outbound if inbound is missing.
             # Use .combine_first() which fills NaNs in the first series with values from the second.
             merged_df['Territory_Name'] = merged_df['Inbound_Territory'].combine_first(merged_df['Outbound_Territory'])
@@ -451,8 +457,12 @@ def register_callbacks(app):
             merged_df['RemainingKits'] = merged_df['TubesSent'] - merged_df['SamplesReturned']
             
             # Drop the intermediate columns used for consolidation
+            # Ensure 'Order_ID' is included in the drop list now that it's used as a fallback
+            columns_to_drop = [
+                'Location_ID_out', 'Location_ID_in', 'Outbound_Territory', 'Inbound_Territory', 'Order_ID'
+            ]
             merged_df = merged_df.drop(columns=[
-                col for col in ['Location_ID_out', 'Location_ID_in', 'Outbound_Territory', 'Inbound_Territory']
+                col for col in columns_to_drop
                 if col in merged_df.columns
             ])
 
